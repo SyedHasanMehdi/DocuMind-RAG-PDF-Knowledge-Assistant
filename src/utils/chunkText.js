@@ -1,26 +1,24 @@
-import dotenv from "dotenv";
+// chunkText.js
+// Splits a long string of text into smaller overlapping chunks so that each
+// chunk fits within the embedding model's input size limit.
+// Chunk size and overlap can be tuned via environment variables.
 
-dotenv.config();
+import { RecursiveCharacterTextSplitter } from "@langchain/textsplitters";
 
-const CHUNK_SIZE = Number(process.env.CHUNK_SIZE);
-const CHUNK_OVERLAP = Number(process.env.CHUNK_OVERLAP);
+// How many characters to put in each chunk (default: 600)
+const CHUNK_SIZE = Number(process.env.CHUNK_SIZE) || 600;
 
-export function chunkText(text) {
-  const words = text.split(/\s+/).filter(Boolean);
+// How many characters the next chunk should re-use from the end of the previous
+// one. Overlap helps preserve context at chunk boundaries (default: 120).
+const CHUNK_OVERLAP = Number(process.env.CHUNK_OVERLAP) || 120;
 
-  const chunks = [];
+const textSplitter = new RecursiveCharacterTextSplitter({
+  chunkSize: CHUNK_SIZE,
+  chunkOverlap: Math.min(CHUNK_OVERLAP, CHUNK_SIZE - 1),
+});
 
-  let start = 0;
-
-  while (start < words.length) {
-    const end = start + CHUNK_SIZE;
-
-    const chunk = words.slice(start, end).join(" ");
-
-    chunks.push(chunk);
-
-    start += CHUNK_SIZE - CHUNK_OVERLAP;
-  }
-
-  return chunks;
+// Split text into an array of non-empty string chunks
+export async function chunkText(text) {
+  const chunks = await textSplitter.splitText(text);
+  return chunks.filter(Boolean);
 }

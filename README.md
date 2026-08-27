@@ -1,7 +1,9 @@
 # **AI-Powered RAG Document Chatbot**
 A backend application that allows users to store documents, convert their content into vector embeddings, store those embeddings in PostgreSQL using pgvector, retrieve semantically relevant content, and generate answers using Google's Gemini models.
 
-The project is being built step-by-step to understand how a Retrieval-Augmented Generation (RAG) system works internally rather than relying on a pre-built RAG framework.
+The project is being built step-by-step to understand how a Retrieval-Augmented Generation (RAG) system works.
+
+Express, routes, and controllers stay ours. The RAG pieces (chunking, embeddings, pgvector store, retrieval, prompt, LLM) now use LangChain so we do not maintain that pipeline by hand.
 
 ## **📌 What is RAG?**
 RAG = Retrieval-Augmented Generation.
@@ -54,9 +56,10 @@ The following parts are currently working:
  Vector storage in PostgreSQL
  Semantic similarity search
  Gemini LLM response generation
- RAG pipeline
- Chat API
- Multiple document management
+ LangChain RAG pipeline
+ Chat API (requires document_id)
+ Retrieval-only API for debugging
+ Multiple documents via document_id metadata
  Document metadata
  PDF/file upload
  Production-ready validation
@@ -78,17 +81,18 @@ Controller
      ↓
 Ingestion Service
      ↓
-Chunking
+LangChain RecursiveCharacterTextSplitter
      ↓
-Gemini Embedding API
+LangChain Gemini embeddings (1536 dims)
      ↓
-1536-dimensional vectors
+LangChain PGVectorStore
      ↓
 PostgreSQL + pgvector
+(metadata.document_id stored with each chunk)
 ### **2. Question Answering Pipeline**
 When the user asks a question:
 
-User Question
+User Question + document_id
      ↓
 Chat API
      ↓
@@ -96,17 +100,16 @@ Chat Controller
      ↓
 RAG Service
      ↓
-Gemini Embedding
+LangChain retriever
+(filter: metadata.document_id)
      ↓
-Query Vector
+Relevant chunks from THAT document only
      ↓
-pgvector Similarity Search
+ChatPromptTemplate
      ↓
-Relevant Chunks
+ChatGoogleGenerativeAI
      ↓
-Gemini LLM
-     ↓
-Final Answer
+Final Answer + sources
 ## **📂 Current Project Structure**
 rag-chatbot/
 │
@@ -129,20 +132,20 @@ rag-chatbot/
 │   │
 │   ├── services/
 │   │   ├── embeddingService.js
+│   │   ├── vectorStore.js
+│   │   ├── pdfLoaderService.js
 │   │   ├── ingestionService.js
 │   │   ├── retrievalService.js
 │   │   ├── llmService.js
 │   │   └── ragService.js
 │   │
 │   ├── utils/
-│   │   └── chunkText.js
+│   │   └── chunkText.js          # RecursiveCharacterTextSplitter
 │   │
-│   ├── testEmbedding.js
-│   ├── testRetrieval.js
-│   ├── testRag.js
 │   └── server.js
 │
 ├── .env
+├── .env.example
 ├── package.json
 ├── package-lock.json
 └── README.md
@@ -214,12 +217,16 @@ Handles user questions.
 Currently:
 
 POST /api/chat
+POST /api/chat/retrieve
 
-For example:
+Chat needs both the question and document_id so search cannot mix files:
 
 {
-  "query": "What work did Syed do at MountBlue?"
+  "query": "What work did Syed do at MountBlue?",
+  "document_id": "uuid-from-ingest"
 }
+
+/retrieve returns chunks + distances only. Use it when the answer looks wrong and you want to see whether retrieval picked the right text.
 ## **🎮 src/controllers/**
 Controllers handle HTTP requests and responses.
 
@@ -236,10 +243,12 @@ Receives document text from the client.
 For example:
 
 {
-  "text": "Syed Hasan Mehdi..."
+  "text": "Syed Hasan Mehdi...",
+  "filename": "resume.txt"
 }
 
 The controller validates the request and passes the text to the ingestion service.
+The response includes document_id. Save it — chat will not work without it.
 
 It does not perform chunking or embedding itself.
 
@@ -249,14 +258,11 @@ That's important because controllers should remain focused on HTTP concerns.
 Receives the user's question:
 
 {
-  "query": "What work did Syed do at MountBlue?"
+  "query": "What work did Syed do at MountBlue?",
+  "document_id": "uuid-from-ingest"
 }
 
-It passes the question to:
-
-ragService.js
-
-and returns the generated answer.
+It passes the question and document_id to ragService.js and returns the generated answer plus sources.
 
 ## **🧠 src/services/**
 This is where most of the application's business logic lives.
@@ -358,13 +364,9 @@ chunkText()
      ↓
 Multiple chunks
      ↓
-createEmbedding()
+getVectorStore().addDocuments()
      ↓
-Vectors
-     ↓
-Repository
-     ↓
-Database
+Embeddings + PostgreSQL
 
 For every chunk:
 
@@ -536,47 +538,17 @@ Chunk C → 0.71
 
 Chunk A is more similar to the query than B or C.
 
-## **🧪 Testing Files**
-We currently have three useful test files.
+## **🧪 Debugging Retrieval**
+Use the retrieve-only API instead of old test files.
 
-### **testEmbedding.js**
-Tests:
+POST /api/chat/retrieve
 
-Text
- ↓
-Gemini
- ↓
-Embedding
+{
+  "query": "What work did Syed do at MountBlue?",
+  "document_id": "PASTE_DOCUMENT_ID"
+}
 
-It confirms that we can generate a 1536-dimensional embedding.
-
-### **testRetrieval.js**
-Tests:
-
-Question
- ↓
-Embedding
- ↓
-pgvector
- ↓
-Relevant chunks
-
-It confirms that semantic search works.
-
-### **testRag.js**
-Tests the complete pipeline:
-
-Question
- ↓
-Retrieval
- ↓
-Context
- ↓
-Gemini
- ↓
-Answer
-
-This was useful for developing and debugging the application before exposing the functionality through an API.
+This returns matching chunks and distances without calling the LLM, so you can see if search is wrong or the answer is wrong.
 
 ## **🔌 API**
 ### **Ingest Document**
