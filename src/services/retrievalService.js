@@ -1,12 +1,8 @@
-// retrievalService.js
-// Finds the most relevant text chunks for a given question using vector similarity search.
-// Optionally filters results to a single document when a document_id is provided.
-
+import pool from "../config/db.js";
+import { embedText } from "./embeddingService.js";
 import { getDocumentById } from "../repositories/documentRepository.js";
-import { getVectorStore } from "./vectorStore.js";
 import { hasUsefulReadableText } from "../utils/textQuality.js";
 
-// Custom error thrown when a caller requests a document that does not exist
 export class DocumentNotFoundError extends Error {
   constructor(documentId) {
     super(`Document not found: ${documentId}`);
@@ -15,41 +11,42 @@ export class DocumentNotFoundError extends Error {
   }
 }
 
-// Search the vector store for chunks similar to the question.
-// Returns an array of chunk objects sorted by relevance (most relevant first).
-export async function retrieveRelevantChunks(
-  question,
-  documentId = null,
-  maxRelevantChunks = 5
-) {
-  // If a specific document is requested, verify it exists before searching
-  let metadataFilter;
+export async function retrieveRelevantChunks(question, documentId = null, maxChunks = 5) {
   if (documentId) {
-    const document = await getDocumentById(documentId);
-    if (!document) {
-      throw new DocumentNotFoundError(documentId);
-    }
-    metadataFilter = { document_id: documentId };
+    const doc = await getDocumentById(documentId);
+    if (!doc) throw new DocumentNotFoundError(documentId);
   }
 
-  // Fetch more candidates than needed so we have room to filter out low-quality chunks
-  const vectorStore = await getVectorStore();
-  const searchResults = await vectorStore.similaritySearchWithScore(
-    question,
-    Math.max(maxRelevantChunks * 3, 15),
-    metadataFilter
+  const queryVector = await embedText(question);
+  const fetchCount = Math.max(maxChunks * 3, 15);
+
+  const whereClause = documentId
+    ? `WHERE metadata->>'document_id' = $2`
+    : "";
+
+  const params = documentId
+    ? [JSON.stringify(queryVector), documentId, fetchCount]
+    : [JSON.stringify(queryVector), fetchCount];
+
+  const limitParam = documentId ? "$3" : "$2";
+
+  const result = await pool.query(
+    `SELECT content, metadata, 1 - (embedding <=> $1::vector) AS score
+     FROM document_chunks
+     ${whereClause}
+     ORDER BY embedding <=> $1::vector
+     LIMIT ${limitParam}`,
+    params
   );
 
-  // Keep only chunks that contain enough real words, then trim to the requested count
-  return searchResults
-    .filter(([chunk]) => hasUsefulReadableText(chunk.pageContent))
-    .slice(0, maxRelevantChunks)
-    .map(([chunk, distance]) => ({
-      id: chunk.id,
-      content: chunk.pageContent,
-      distance,
-      document_id: chunk.metadata?.document_id ?? documentId ?? null,
-      filename: chunk.metadata?.filename ?? null,
-      chunk_index: chunk.metadata?.chunk_index ?? null,
+  return result.rows
+    .filter(row => hasUsefulReadableText(row.content))
+    .slice(0, maxChunks)
+    .map(row => ({
+      content: row.content,
+      score: row.score,
+      document_id: row.metadata?.document_id ?? null,
+      filename: row.metadata?.filename ?? null,
+      chunk_index: row.metadata?.chunk_index ?? null,
     }));
 }
