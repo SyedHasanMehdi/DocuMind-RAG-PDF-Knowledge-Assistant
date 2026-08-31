@@ -1,9 +1,9 @@
 import { GoogleGenAI } from "@google/genai";
 
 const SYSTEM_PROMPT = `You are a helpful assistant answering questions based only on the provided context.
-- Answer using the context.
-- Do not make up information.
-- If the answer is not in the context, say you don't have enough information.
+- Answer using the retrieved context.
+- Do not invent or assume information.
+- If the answer is not present in the retrieved context, clearly state that the information is not available in the provided documents.
 - Keep the answer clear and concise.`;
 
 export async function generateAnswer(question, context) {

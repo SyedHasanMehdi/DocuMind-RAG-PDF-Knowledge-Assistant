@@ -12,6 +12,9 @@ export async function embedText(text) {
   return res.embeddings[0].values;
 }
 
+// Alias for single question/query embedding
+export const embedQuery = embedText;
+
 // Embed multiple chunks in a single API call — used at ingestion time
 export async function embedBatch(chunks) {
   const res = await ai.models.embedContent({

@@ -5,7 +5,6 @@
 
 import "dotenv/config";
 import express from "express";
-import documentRoutes from "./routes/documentRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import { setupDatabase } from "./config/setupDb.js";
 import { syncDocsFolder } from "./services/ingestionService.js";
@@ -16,7 +15,6 @@ const app = express();
 app.use(express.json());
 
 // Register route groups
-app.use("/api/documents", documentRoutes);
 app.use("/api/chat", chatRoutes);
 
 const PORT = process.env.PORT || 5000;
